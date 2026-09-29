@@ -2,7 +2,7 @@ import { Column, CreateDateColumn, Entity, OneToMany, PrimaryGeneratedColumn, Up
 import { Role } from "../enums/role.enum";
 import { Order } from "../../order/entities/order.entity";
 
-@Entity('user')
+@Entity('users')
 export class User {
     @PrimaryGeneratedColumn()
     id: number;
