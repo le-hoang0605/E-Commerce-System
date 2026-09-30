@@ -7,6 +7,7 @@ import { MailerService } from '@nestjs-modules/mailer';
 import { RegisterRequestDto } from "../dto/register-request.dto";
 import * as bcrypt from 'bcrypt';
 import { Role } from "../../user/enums/role.enum";
+import { VerifyOtpDto } from "../dto/verify-otp.dto";
 @Injectable()
 export class AuthService {
     constructor(
@@ -46,6 +47,46 @@ export class AuthService {
             data: result
         }
     }
+
+    async verifyOtp(verifyOtpDto: VerifyOtpDto) {
+        const user = await this.userRepository.findOne({ where: { email: verifyOtpDto.email } });
+        if (!user) {
+            throw new BadRequestException('User not found');
+        }
+
+        if (user.isVerified) {
+            throw new BadRequestException('User is already verified');
+        }
+
+        const otpRecord = await this.otpTokenRepository.findOne({
+            where: {
+                userId: user.id,
+                code: verifyOtpDto.otp,
+                isUsed: false,
+            },
+            order: { createdAt: 'DESC' }
+        });
+
+        if (!otpRecord) {
+            throw new BadRequestException('Invalid OTP code');
+        }
+
+        if (otpRecord.expiresAt < new Date()) {
+            throw new BadRequestException('OTP code has expired');
+        }
+
+        otpRecord.isUsed = true;
+        await this.otpTokenRepository.save(otpRecord);
+
+        user.isVerified = true;
+        await this.userRepository.save(user);
+
+        return {
+            message: 'User verified successfully'
+        }
+    }
+
+
     private async senOtp(user: User): Promise<string> {
         const optCode = Math.floor(100000 + Math.random() * 900000).toString();
 

@@ -13,6 +13,9 @@ export class User {
     @Column({ select: false })
     password: string;
 
+    @Column({ name: 'is_verified', default: false })
+    isVerified: boolean;
+
     @Column({ length: 100, name: 'first_name' })
     firstName: string;
 
