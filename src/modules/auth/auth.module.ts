@@ -9,6 +9,9 @@ import { OtpToken } from './entities/otp-token.entity';
 import { User } from '../user/entities/user.entity';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MailerModule } from '@nestjs-modules/mailer';
+import { JwtStrategy } from './strategies/jwt.strategy';
+import { PassportModule } from '@nestjs/passport';
+import { JwtModule } from '@nestjs/jwt';
 
 @Module({
     imports: [
@@ -26,10 +29,12 @@ import { MailerModule } from '@nestjs-modules/mailer';
             defaults: {
                 from: `"No Reply" <${process.env.MAIL_USER!}>`,
             } as any,
-        })
+        }),
+        PassportModule.register({ defaultStrategy: 'jwt' }),
+        JwtModule.register({}),
     ],
     controllers: [AuthController],
-    providers: [AuthService],
-    exports: [AuthService],
+    providers: [AuthService, JwtStrategy],
+    exports: [AuthService, PassportModule],
 })
 export class AuthModule { }

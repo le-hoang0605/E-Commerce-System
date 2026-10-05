@@ -17,4 +17,6 @@ export class AuthController {
     verifyOtp(@Body() verifyOtpDto: VerifyOtpDto) {
         return this.authService.verifyOtp(verifyOtpDto);
     }
+
+    
 }

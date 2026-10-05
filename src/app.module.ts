@@ -7,9 +7,13 @@ import { FlashSaleModule } from './modules/flash-sale/flash-sale.module';
 import { OrderModule } from './modules/order/order.module';
 import { PaymentModule } from './modules/payment/payment.module';
 import { AppDataSource } from './config/typeorm.config';
+import { ConfigModule } from '@nestjs/config';
 
 @Module({
   imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+    }),
     AuthModule,
     TypeOrmModule.forRoot(AppDataSource.options),
     UserModule,
