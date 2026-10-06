@@ -15,11 +15,12 @@ import { UserService } from "../../user/services/user.service";
 import { JwtPayload } from "../interfaces/jwt-payload.interface";
 import { JwtRefresh } from "../interfaces/jwt-refresh.interface";
 import { RefreshTokenDto } from "../dto/refresh-token.dto";
+import { RegisterResult } from "../dto/register-result.dto";
+import { LoginResult } from "../dto/login-result.dto";
+import { RefreshTokenResult } from "../dto/refresh-token-result.dto";
 @Injectable()
 export class AuthService {
     constructor(
-        @InjectRepository(User)
-        private readonly userRepository: Repository<User>,
 
         @InjectRepository(OtpToken)
         private readonly otpTokenRepository: Repository<OtpToken>,
@@ -32,37 +33,42 @@ export class AuthService {
 
         private readonly configService: ConfigService,
     ) { }
-    async register(registerRequestDto: RegisterRequestDto) {
-        const existingUser = await this.userRepository.findOne({ where: { email: registerRequestDto.email } });
+    async register(registerRequestDto: RegisterRequestDto): Promise<RegisterResult> {
+        const existingUser = await this.userService.findByEmail(registerRequestDto.email);
         if (existingUser) {
             throw new BadRequestException('Email already exists');
         }
 
         const hashedPassword = await bcrypt.hash(registerRequestDto.password, 10);
 
-        const newUser = this.userRepository.create(
-            {
-                email: registerRequestDto.email,
-                password: hashedPassword,
-                firstName: registerRequestDto.firstName,
-                lastName: registerRequestDto.lastName,
-                phone: registerRequestDto.phone,
-                role: Role.CUSTOMER
-            }
-        );
-        const savedUser = await this.userRepository.save(newUser);
+        const newUser: User = await this.userService.createUser({
+            email: registerRequestDto.email,
+            password: hashedPassword,
+            firstName: registerRequestDto.firstName,
+            lastName: registerRequestDto.lastName,
+            phone: registerRequestDto.phone,
+            role: Role.CUSTOMER,
+            isVerified: false,
+        });
 
-        await this.sendOtp(savedUser);
+        await this.sendOtp(newUser);
 
-        const { password, ...result } = savedUser;
         return {
-            message: 'User registered successfully. Please check your email for the OTP code.',
-            data: result
-        }
+            message:
+                'User registered successfully. Please check your email for the OTP code.',
+            user: {
+                id: newUser.id,
+                email: newUser.email,
+                role: newUser.role,
+                firstName: newUser.firstName,
+                lastName: newUser.lastName,
+                phone: newUser.phone,
+            },
+        };
     }
 
-    async verifyOtp(verifyOtpDto: VerifyOtpDto) {
-        const user = await this.userRepository.findOne({ where: { email: verifyOtpDto.email } });
+    async verifyOtp(verifyOtpDto: VerifyOtpDto): Promise<{ message: string }> {
+        const user = await this.userService.findByEmail(verifyOtpDto.email);
         if (!user) {
             throw new BadRequestException('User not found');
         }
@@ -91,8 +97,7 @@ export class AuthService {
         otpRecord.isUsed = true;
         await this.otpTokenRepository.save(otpRecord);
 
-        user.isVerified = true;
-        await this.userRepository.save(user);
+        await this.userService.markAsVerified(user.id);
 
         return {
             message: 'User verified successfully'
@@ -132,10 +137,10 @@ export class AuthService {
         return otpCode;
     }
 
-    async login(loginDto: LoginDto) {
+    async login(loginDto: LoginDto): Promise<LoginResult> {
         const { email, password } = loginDto;
 
-        const user = await this.userService.findByEmail(email);
+        const user = await this.userService.findByEmailWithPassword(email);
         if (!user) {
             throw new BadRequestException('Invalid email or password');
         }
@@ -149,41 +154,47 @@ export class AuthService {
         return this.generateTokens(user);
     }
 
-    async refreshToken(refreshToken: RefreshTokenDto) {
-        try {
-            const payload = await this.jwtService.verifyAsync(refreshToken.refreshToken, {
-                secret: this.configService.getOrThrow('JWT_REFRESH_SECRET'),
-            });
-            if (payload.type !== 'refresh') {
-                throw new BadRequestException('Invalid refresh token');
-            }
+    async refreshToken(refreshTokenDto: RefreshTokenDto): Promise<RefreshTokenResult> {
+        let payload: JwtRefresh;
 
-            const user = await this.userService.findById(payload.sub);
-            if (!user) {
-                throw new BadRequestException('User not found');
-            }
-            const accessPayLoad: JwtPayload = {
-                sub: user.id,
-                email: user.email,
-                role: user.role
-            };
-            const accessToken = await this.jwtService.signAsync(accessPayLoad, {
-                secret: this.configService.getOrThrow('JWT_SECRET'),
-                expiresIn: this.configService.getOrThrow('JWT_ACCESS_TOKEN_EXPIRATION_TIME'),
-            });
-            return {
-                message: 'Token refreshed successfully',
-                data: {
-                    accessToken
-                }
-            };
+        try {
+            payload = await this.jwtService.verifyAsync<JwtRefresh>(
+                refreshTokenDto.refreshToken,
+                {
+                    secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
+                },
+            );
         } catch {
             throw new UnauthorizedException('Invalid or expired refresh token');
         }
+
+        if (payload.type !== 'refresh') {
+            throw new BadRequestException('Invalid refresh token type');
+        }
+
+        const user: User | null = await this.userService.findById(payload.sub);
+        if (!user || !user.isVerified) {
+            throw new UnauthorizedException('User not found or not verified');
+        }
+
+        const accessPayload: JwtPayload = {
+            sub: user.id,
+            email: user.email,
+            role: user.role,
+        };
+
+        const accessToken: string = await this.jwtService.signAsync(accessPayload, {
+            secret: this.configService.getOrThrow<string>('JWT_SECRET'),
+            expiresIn: this.configService.getOrThrow('JWT_ACCESS_TOKEN_EXPIRATION_TIME') as any,
+        });
+
+        return {
+            accessToken,
+        };
     }
 
 
-    private async generateTokens(user: User) {
+    private async generateTokens(user: User): Promise<LoginResult> {
         const accessPayLoad: JwtPayload = {
             sub: user.id,
             email: user.email,
@@ -205,19 +216,16 @@ export class AuthService {
             })
         ]);
         return {
-            message: 'Login successful',
-            data: {
-                accessToken,
-                refreshToken
-            },
+            accessToken,
+            refreshToken,
             user: {
                 id: user.id,
                 email: user.email,
                 role: user.role,
                 firstName: user.firstName,
                 lastName: user.lastName,
-                phone: user.phone
-            }
+                phone: user.phone,
+            },
         }
     }
 }
