@@ -108,7 +108,11 @@ export class AuthService {
     private async sendOtp(user: User): Promise<string> {
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-        const expiresAt = new Date(Date.now() + 2 * 60 * 1000);
+        const expiresAt = new Date(Date.now() + 3 * 60 * 1000);
+
+        console.log('\n==================================================');
+        console.log(`[DEV OTP] Mã OTP của ${user.email} là: >>> ${otpCode} <<<`);
+        console.log('==================================================\n');
 
         const otp = this.otpTokenRepository.create(
             {
@@ -127,7 +131,7 @@ export class AuthService {
             <h2>Hello ${fullName}</h2>
             <p>Your OTP code is:</p>
             <h1>${otpCode}</h1>
-            <p>This code will expire in 2 minutes.</p>
+            <p>This code will expire in 3 minutes.</p>
   `,
             context: {
                 name: fullName,

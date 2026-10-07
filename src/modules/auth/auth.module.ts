@@ -12,9 +12,11 @@ import { MailerModule } from '@nestjs-modules/mailer';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { PassportModule } from '@nestjs/passport';
 import { JwtModule } from '@nestjs/jwt';
+import { UserModule } from '../user/user.module';
 
 @Module({
     imports: [
+        UserModule,
         TypeOrmModule.forFeature([User, OtpToken]),
         MailerModule.forRoot({
             transport: {
