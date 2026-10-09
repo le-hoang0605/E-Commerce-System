@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Put, Query, UseGuards } from "@nestjs/common";
 import { ProductService } from "../services/product.service";
 import { PaginatedProductResponseDto } from "../dto/paginated-product-response.dto";
 import { GetProductsQueryDto } from "../dto/get-products-query.dto";
@@ -9,6 +9,7 @@ import { Roles } from "../../../common/decorators/roles.decorator";
 import { Role } from "../../user/enums/role.enum";
 import { CreateProductDto } from "../dto/create-product.dto";
 import { ProductResponseDto } from "../dto/product-response.dto";
+import { UpdateProductDto } from "../dto/update-product.dto";
 
 @Controller('api/v1/products')
 export class ProductController {
@@ -36,5 +37,16 @@ export class ProductController {
         @Body() createProductDto: CreateProductDto,
     ): Promise<ProductResponseDto> {
         return this.productService.create(createProductDto);
+    }
+
+    @Put(':id')
+    @UseGuards(JwtAuthGuard, RolesGuard)
+    @Roles(Role.ADMIN)
+    @HttpCode(HttpStatus.OK)
+    async update(
+        @Param('id') id: number,
+        @Body() updateProductDto: UpdateProductDto,
+    ): Promise<ProductDetailResponseDto> {
+        return this.productService.update(id, updateProductDto);
     }
 }

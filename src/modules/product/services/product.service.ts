@@ -8,6 +8,7 @@ import { GetProductsQueryDto } from "../dto/get-products-query.dto";
 import type { Cache } from 'cache-manager';
 import { ProductDetailResponseDto } from "../dto/product-detail-response.dto";
 import { CreateProductDto } from "../dto/create-product.dto";
+import { UpdateProductDto } from "../dto/update-product.dto";
 
 @Injectable()
 export class ProductService {
@@ -118,6 +119,51 @@ export class ProductService {
             createdAt: savedProduct.createdAt,
             updatedAt: savedProduct.updatedAt,
         };
+    }
+
+
+    async update(
+        id: number,
+        updateProductDto: UpdateProductDto,
+    ): Promise<ProductDetailResponseDto> {
+        const product = await this.productRepository.findOne({
+            where: { id },
+        });
+
+        if (!product) {
+            throw new NotFoundException("Product with ID ${id} is not exist!");
+        }
+
+        if (updateProductDto.sku && updateProductDto.sku !== product.sku) {
+            const existingSku = await this.productRepository.findOne({
+                where: { sku: updateProductDto.sku },
+            });
+
+            if (existingSku) {
+                throw new ConflictException("SKU ${updateProductDto.sku} is already in use!");
+            }
+        }
+        Object.assign(product, updateProductDto);
+        const updatedProduct = await this.productRepository.save(product);
+
+        const detailCacheKey = `product:detail:${id}`;
+        await this.cacheManager.del(detailCacheKey);
+
+        await this.clearCacheForProduct();
+
+        return {
+            id: updatedProduct.id,
+            name: updatedProduct.name,
+            sku: updatedProduct.sku,
+            description: updatedProduct.description,
+            originalPrice: Number(updatedProduct.originalPrice),
+            stockQuantity: updatedProduct.stockQuantity,
+            imageUrl: updatedProduct.imageUrl,
+            isActive: updatedProduct.isActive,
+            createdAt: updatedProduct.createdAt,
+            updatedAt: updatedProduct.updatedAt,
+        };
+
     }
 
     private async clearCacheForProduct(): Promise<void> {
