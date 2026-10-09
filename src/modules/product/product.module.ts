@@ -7,9 +7,12 @@ import { Product } from './entities/product.entity';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ProductController } from './controllers/product.controller';
 import { ProductService } from './services/product.service';
+import { CacheModule } from '@nestjs/cache-manager';
 
 @Module({
-    imports: [TypeOrmModule.forFeature([Product])],
+    imports: [TypeOrmModule.forFeature([Product]),
+    CacheModule.register(),
+    ],
     controllers: [ProductController],
     providers: [ProductService],
     exports: [ProductService],

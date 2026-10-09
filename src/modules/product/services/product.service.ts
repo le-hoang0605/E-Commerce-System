@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Product } from "../entities/product.entity";
 import { Repository } from "typeorm";
@@ -7,6 +7,7 @@ import { PaginatedProductResponseDto } from "../dto/paginated-product-response.d
 import { GetProductsQueryDto } from "../dto/get-products-query.dto";
 import type { Cache } from 'cache-manager';
 import { ProductDetailResponseDto } from "../dto/product-detail-response.dto";
+import { CreateProductDto } from "../dto/create-product.dto";
 
 @Injectable()
 export class ProductService {
@@ -92,5 +93,52 @@ export class ProductService {
         await this.cacheManager.set(cacheKey, result, 60 * 10 * 1000);
 
         return result;
+    }
+
+    async create(createProductDto: CreateProductDto): Promise<ProductDetailResponseDto> {
+        const existingProduct = await this.productRepository.findOne({ where: { sku: createProductDto.sku } });
+        if (existingProduct) {
+            throw new ConflictException('Product with this SKU already exists');
+        }
+
+        const newProduct = this.productRepository.create(createProductDto);
+        const savedProduct = await this.productRepository.save(newProduct);
+
+        await this.clearCacheForProduct();
+
+        return {
+            id: savedProduct.id,
+            name: savedProduct.name,
+            sku: savedProduct.sku,
+            description: savedProduct.description,
+            originalPrice: Number(savedProduct.originalPrice),
+            stockQuantity: savedProduct.stockQuantity,
+            imageUrl: savedProduct.imageUrl,
+            isActive: savedProduct.isActive,
+            createdAt: savedProduct.createdAt,
+            updatedAt: savedProduct.updatedAt,
+        };
+    }
+
+    private async clearCacheForProduct(): Promise<void> {
+        const store = this.cacheManager.stores as any;
+
+        if (store.client && typeof store.client.keys === 'function') {
+            const keys: string[] = await store.client.keys('products:*');
+            if (keys.length > 0) {
+                await Promise.all(keys.map((key) => this.cacheManager.del(key)));
+            }
+            return;
+        }
+
+        if (typeof store.keys === 'function') {
+            const rawKeys: string[] = await store.keys();
+            const keyList = Array.from(rawKeys) as string[];
+
+            const keys = keyList.filter((key) => key.startsWith('products:'));
+            if (keys.length > 0) {
+                await Promise.all(keys.map((key) => this.cacheManager.del(key)));
+            }
+        }
     }
 }
