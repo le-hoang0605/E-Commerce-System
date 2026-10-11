@@ -1,7 +1,7 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Product } from "../entities/product.entity";
-import { Repository } from "typeorm";
+import { In, Repository } from "typeorm";
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { PaginatedProductResponseDto } from "../dto/paginated-product-response.dto";
 import { GetProductsQueryDto } from "../dto/get-products-query.dto";
@@ -186,5 +186,14 @@ export class ProductService {
                 await Promise.all(keys.map((key) => this.cacheManager.del(key)));
             }
         }
+    }
+
+    async findById(id: number): Promise<Product | null> {
+        return this.productRepository.findOne({ where: { id } });
+    }
+
+    async findByIds(ids: number[]): Promise<Product[]> {
+        if (!ids || ids.length === 0) return [];
+        return this.productRepository.findBy({ id: In(ids) });
     }
 }
