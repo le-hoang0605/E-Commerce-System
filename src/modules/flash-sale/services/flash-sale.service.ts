@@ -1,6 +1,6 @@
 import { InjectRepository } from "@nestjs/typeorm";
 import { FlashSaleEvent } from "../entities/flash-sale-event.entity";
-import { Repository } from "typeorm";
+import { Repository, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
 import { FlashSaleItem } from "../entities/flash-sale-item.entity";
 import { ProductService } from "../../product/services/product.service";
 import { CACHE_MANAGER } from "@nestjs/cache-manager";
@@ -8,6 +8,8 @@ import { BadRequestException, Inject, NotFoundException } from "@nestjs/common";
 import { CreateFlashSaleEventDto } from "../dto/create-flash-sale-event.dto";
 import { FlashSaleEventResponseDto } from "../dto/flash-sale-event-response.dto";
 import type { Cache } from 'cache-manager';
+import { ActiveFlashSaleResponseDto } from "../dto/active-flash-sale-response.dto";
+import { ActiveFlashSaleItemResponseDto } from "../dto/active-flash-sale-item-response.dto";
 
 export class FlashSaleService {
     constructor(
@@ -91,6 +93,58 @@ export class FlashSaleService {
                 allocatedStock: item.allocatedStock,
                 limitPerUser: item.limitPerUser,
             })),
+        };
+    }
+
+    async getActiveFlashSale(): Promise<ActiveFlashSaleResponseDto> {
+        const now = new Date();
+
+        const activeEvent = await this.flashSaleEventRepository.findOne({
+            where: {
+                isActive: true,
+                startTime: LessThanOrEqual(now),
+                endTime: MoreThanOrEqual(now),
+            },
+            relations: {
+                items: {
+                    product: true,
+                },
+            },
+        });
+
+        if (!activeEvent) {
+            throw new NotFoundException('There is no active Flash Sale event at this time');
+        }
+
+        const itemDtos: ActiveFlashSaleItemResponseDto[] = await Promise.all(
+            activeEvent.items.map(async (item) => {
+                const cacheKey = `flashsale:stock:${item.id}`;
+                const cachedStock = await this.cacheManager.get<number>(cacheKey);
+
+                const availableStock = cachedStock !== null && cachedStock !== undefined
+                    ? Number(cachedStock)
+                    : item.allocatedStock - item.soldQuantity;
+
+                return {
+                    id: item.id,
+                    productId: item.productId,
+                    productName: item.product?.name || '',
+                    productImage: item.product?.imageUrl || '',
+                    originalPrice: Number(item.product?.originalPrice || 0),
+                    flashSalePrice: Number(item.flashSalePrice),
+                    availableStock: Math.max(availableStock, 0),
+                    allocatedStock: item.allocatedStock,
+                    soldQuantity: item.soldQuantity,
+                    limitPerUser: item.limitPerUser,
+                };
+            }),
+        );
+        return {
+            id: activeEvent.id,
+            title: activeEvent.title,
+            startTime: activeEvent.startTime,
+            endTime: activeEvent.endTime,
+            items: itemDtos,
         };
     }
 }
