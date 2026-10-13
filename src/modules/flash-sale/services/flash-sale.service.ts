@@ -4,12 +4,16 @@ import { Repository, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
 import { FlashSaleItem } from "../entities/flash-sale-item.entity";
 import { ProductService } from "../../product/services/product.service";
 import { CACHE_MANAGER } from "@nestjs/cache-manager";
-import { BadRequestException, Inject, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, NotFoundException } from "@nestjs/common";
 import { CreateFlashSaleEventDto } from "../dto/create-flash-sale-event.dto";
 import { FlashSaleEventResponseDto } from "../dto/flash-sale-event-response.dto";
 import type { Cache } from 'cache-manager';
 import { ActiveFlashSaleResponseDto } from "../dto/active-flash-sale-response.dto";
 import { ActiveFlashSaleItemResponseDto } from "../dto/active-flash-sale-item-response.dto";
+import { InjectQueue } from "@nestjs/bullmq";
+import { Queue } from "bullmq";
+import { PurchaseFlashSaleDto } from "../dto/purchase-flash-sale.dto";
+import { PurchaseFlashSaleResponseDto } from "../dto/purchase-flash-sale-response.dto";
 
 export class FlashSaleService {
     constructor(
@@ -23,6 +27,9 @@ export class FlashSaleService {
 
         @Inject(CACHE_MANAGER)
         private readonly cacheManager: Cache,
+
+        @InjectQueue('flash-sale-purchase')
+        private readonly purchaseQueue: Queue,
     ) { }
     async createEvent(dto: CreateFlashSaleEventDto): Promise<FlashSaleEventResponseDto> {
         const start = new Date(dto.startTime);
@@ -145,6 +152,108 @@ export class FlashSaleService {
             startTime: activeEvent.startTime,
             endTime: activeEvent.endTime,
             items: itemDtos,
+        };
+    }
+    async purchase(
+        userId: number,
+        dto: PurchaseFlashSaleDto,
+    ): Promise<PurchaseFlashSaleResponseDto> {
+        const { flashSaleItemId, quantity } = dto;
+
+        const flashSaleItem = await this.flashSaleItemRepository.findOne({
+            where: { id: flashSaleItemId },
+            relations: {
+                flashSaleEvent: true,
+            },
+        });
+
+        if (!flashSaleItem || !flashSaleItem.flashSaleEvent.isActive) {
+            throw new NotFoundException('Flash sale item is not active or does not exist');
+        }
+
+        const now = new Date();
+        if (
+            now < flashSaleItem.flashSaleEvent.startTime ||
+            now > flashSaleItem.flashSaleEvent.endTime
+        ) {
+            throw new BadRequestException('Flash sale event is not currently ongoing');
+        }
+
+        const stockKey = `flashsale:stock:${flashSaleItemId}`;
+        const userBoughtKey = `flashsale:user_bought:${flashSaleItemId}:${userId}`;
+
+        const luaScript = `
+      local stockKey = KEYS[1]
+      local userKey = KEYS[2]
+      local qty = tonumber(ARGV[1])
+      local limit = tonumber(ARGV[2])
+
+      local currentStock = tonumber(redis.call('get', stockKey) or '-1')
+      if currentStock < qty then
+          return -1 -- Out of stock
+      end
+
+      local userBought = tonumber(redis.call('get', userKey) or '0')
+      if (userBought + qty) > limit then
+          return -2 -- Exceeds limit per user
+      end
+
+      redis.call('decrby', stockKey, qty)
+      redis.call('incrby', userKey, qty)
+      return 1 -- Success
+    `;
+
+        const store = this.cacheManager.stores as any;
+        let luaResult: number;
+
+        if (store.client && typeof store.client.eval === 'function') {
+            luaResult = await store.client.eval(
+                luaScript,
+                2,
+                stockKey,
+                userBoughtKey,
+                quantity,
+                flashSaleItem.limitPerUser,
+            );
+        } else {
+            const cachedStock = (await this.cacheManager.get<number>(stockKey)) ?? 0;
+            if (cachedStock < quantity) {
+                luaResult = -1;
+            } else {
+                await this.cacheManager.set(stockKey, cachedStock - quantity);
+                luaResult = 1;
+            }
+        }
+
+        if (luaResult === -1) {
+            throw new ConflictException('Product is out of stock in this Flash Sale event');
+        }
+
+        if (luaResult === -2) {
+            throw new BadRequestException(
+                `You have reached the maximum allowed limit (${flashSaleItem.limitPerUser}) for this item`,
+            );
+        }
+
+        const job = await this.purchaseQueue.add(
+            'process-purchase',
+            {
+                userId,
+                flashSaleItemId,
+                quantity,
+            },
+            {
+                attempts: 3,
+                backoff: { type: 'exponential', delay: 1000 },
+                removeOnComplete: true,
+            },
+        );
+
+        return {
+            message: 'Flash sale purchase request queued successfully',
+            jobId: String(job.id),
+            flashSaleItemId,
+            quantity,
         };
     }
 }

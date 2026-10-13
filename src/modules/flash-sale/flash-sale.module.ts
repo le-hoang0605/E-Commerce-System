@@ -9,6 +9,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { FlashSaleService } from './services/flash-sale.service';
 import { ProductModule } from '../product/product.module';
 import { FlashSaleEventController } from './controllers/flash-sale-event.controller';
+import { FlashSalePurchaseProcessor } from './processors/flash-sale-purchase.processor';
 
 @Module({
     imports: [
@@ -16,7 +17,7 @@ import { FlashSaleEventController } from './controllers/flash-sale-event.control
         ProductModule,
     ],
     controllers: [FlashSaleEventController],
-    providers: [FlashSaleService],
+    providers: [FlashSaleService, FlashSalePurchaseProcessor],
     exports: [FlashSaleService],
 })
 export class FlashSaleModule { }
